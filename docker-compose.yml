@@ -5,8 +5,22 @@ services:
       TELEGRAM_API_ID: ${TELEGRAM_API_ID}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
       TELEGRAM_LOCAL: 1
-    volumes:
-      - ./data/telegram-bot-api:/var/lib/telegram-bot-api
     ports:
       - "8081:8081"
+    volumes:
+      - ./data/telegram-bot-api:/var/lib/telegram-bot-api
+    restart: unless-stopped
+
+  bot:
+    build: .
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      PROXY: ${PROXY}
+      ALLOWED_USERS: ${ALLOWED_USERS}
+      TELEGRAM_API_SERVER: http://telegram-bot-api:8081
+    volumes:
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+    depends_on:
+      - telegram-bot-api
     restart: unless-stopped
