@@ -282,7 +282,21 @@
             const data = {
                 selected: Array.from(selectedIds)
             };
-            tg.sendData(JSON.stringify(data));
+
+            // Показываем что отправляем
+            tg.MainButton.setText('Отправка...');
+            tg.MainButton.disable();
+
+            try {
+                tg.sendData(JSON.stringify(data));
+                // Mini App должен закрыться автоматически после sendData
+                // Но на всякий случай закрываем через 500мс
+                setTimeout(() => tg.close(), 500);
+            } catch (e) {
+                alert('Ошибка отправки: ' + e.message);
+                tg.MainButton.enable();
+                tg.MainButton.setText(`Скачать (${selectedIds.size})`);
+            }
         }
 
         // Init

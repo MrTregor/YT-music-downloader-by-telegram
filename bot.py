@@ -307,10 +307,12 @@ def handle_playlist_navigation(call: telebot.types.CallbackQuery) -> None:
         bot.answer_callback_query(call.id, 'Ошибка навигации')
 
 
-@bot.message_handler(content_types=['web_app_data'])
+@bot.message_handler(func=lambda m: m.web_app_data is not None)
 def handle_web_app_data(message: telebot.types.Message) -> None:
     """Обработчик данных из Mini App."""
     user_id = message.from_user.id
+    logger.info(f'Получены web_app_data от {user_id}: {message.web_app_data.data[:100]}...')
+
     if not is_allowed(user_id):
         return
 
@@ -537,7 +539,7 @@ def handle_youtube_url(message: telebot.types.Message) -> None:
         )
 
 
-@bot.message_handler(func=lambda m: True)
+@bot.message_handler(func=lambda m: m.web_app_data is None)
 def handle_other(message: telebot.types.Message) -> None:
     """Обработчик всех остальных сообщений."""
     if not is_allowed(message.from_user.id):
