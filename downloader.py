@@ -98,7 +98,7 @@ def get_video_info(url: str) -> dict:
     return result
 
 
-def get_playlist_info(url: str, max_entries: int = 50) -> dict:
+def get_playlist_info(url: str, max_entries: int = 200) -> dict:
     """Получает список видео из плейлиста YouTube.
 
     Args:

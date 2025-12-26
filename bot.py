@@ -126,6 +126,75 @@ def format_duration(seconds: int) -> str:
     return f'{minutes}:{secs:02d}'
 
 
+def build_track_data(entry: dict) -> dict:
+    """Формирует данные трека для Mini App."""
+    return {
+        'id': entry['id'],
+        'title': entry['title'],
+        'duration': format_duration(entry['duration']),
+        'thumb': f'https://i.ytimg.com/vi/{entry["id"]}/default.jpg',  # 120x90
+    }
+
+
+def calc_max_tracks_for_url(entries: list, base_url: str, max_url_len: int = 2000) -> int:
+    """Вычисляет сколько треков влезает в URL (бинарный поиск)."""
+    def url_len(count: int) -> int:
+        tracks_data = [build_track_data(e) for e in entries[:count]]
+        data_json = json.dumps({'tracks': tracks_data}, ensure_ascii=False)
+        data_b64 = base64.urlsafe_b64encode(data_json.encode()).decode()
+        return len(f'{base_url}?data={data_b64}')
+
+    left, right = 1, len(entries)
+    result = 0
+
+    while left <= right:
+        mid = (left + right) // 2
+        if url_len(mid) <= max_url_len:
+            result = mid
+            left = mid + 1
+        else:
+            right = mid - 1
+
+    return result
+
+
+def build_playlist_keyboard(entries: list, start_idx: int, page_size: int, total: int) -> tuple:
+    """Создаёт клавиатуру для выбора диапазона треков."""
+    end_idx = min(start_idx + page_size, len(entries))
+    page_entries = entries[start_idx:end_idx]
+
+    # Формируем данные для Mini App
+    tracks_data = [build_track_data(e) for e in page_entries]
+    data_json = json.dumps({'tracks': tracks_data}, ensure_ascii=False)
+    data_b64 = base64.urlsafe_b64encode(data_json.encode()).decode()
+    webapp_full_url = f'{WEBAPP_URL}?data={data_b64}'
+
+    keyboard = telebot.types.InlineKeyboardMarkup()
+
+    # Кнопка выбора треков
+    keyboard.add(telebot.types.InlineKeyboardButton(
+        text=f'Выбрать треки {start_idx + 1}-{end_idx}',
+        web_app=telebot.types.WebAppInfo(url=webapp_full_url)
+    ))
+
+    # Кнопки навигации
+    nav_buttons = []
+    if start_idx > 0:
+        nav_buttons.append(telebot.types.InlineKeyboardButton(
+            text='◀ Назад',
+            callback_data=f'pl:{start_idx - page_size}:{page_size}'
+        ))
+    if end_idx < len(entries):
+        nav_buttons.append(telebot.types.InlineKeyboardButton(
+            text='Вперёд ▶',
+            callback_data=f'pl:{end_idx}:{page_size}'
+        ))
+    if nav_buttons:
+        keyboard.add(*nav_buttons)
+
+    return keyboard, start_idx + 1, end_idx
+
+
 @bot.message_handler(func=lambda m: is_playlist_url(m.text or ''))
 def handle_playlist_url(message: telebot.types.Message) -> None:
     """Обработчик ссылок на плейлисты YouTube."""
@@ -155,43 +224,33 @@ def handle_playlist_url(message: telebot.types.Message) -> None:
             )
             return
 
-        # Сохраняем данные плейлиста для пользователя
-        playlist_cache[user_id] = {
-            'entries': {e['id']: e for e in entries},  # dict для быстрого поиска
-            'url': url,
-        }
-
-        # Формируем данные для Mini App
-        tracks_data = [
-            {'id': e['id'], 'title': e['title'], 'duration': format_duration(e['duration'])}
-            for e in entries
-        ]
-        data_json = json.dumps({'tracks': tracks_data}, ensure_ascii=False)
-        data_b64 = base64.urlsafe_b64encode(data_json.encode()).decode()
-
-        webapp_full_url = f'{WEBAPP_URL}?data={data_b64}'
-
-        # Проверяем длину URL
-        if len(webapp_full_url) > 2048:
+        # Вычисляем сколько треков влезает в URL
+        page_size = calc_max_tracks_for_url(entries, WEBAPP_URL)
+        if page_size == 0:
             bot.edit_message_text(
-                f'Плейлист слишком большой ({len(entries)} треков).\n'
-                'Максимум ~50 треков для выбора.',
+                'Ошибка: не удалось сформировать URL.',
                 chat_id=message.chat.id,
                 message_id=status_msg.message_id
             )
             return
 
-        # Создаём кнопку с Mini App
-        keyboard = telebot.types.InlineKeyboardMarkup()
-        keyboard.add(telebot.types.InlineKeyboardButton(
-            text=f'Выбрать треки ({len(entries)})',
-            web_app=telebot.types.WebAppInfo(url=webapp_full_url)
-        ))
+        # Сохраняем данные плейлиста для пользователя
+        playlist_cache[user_id] = {
+            'entries': {e['id']: e for e in entries},
+            'entries_list': entries,  # сохраняем как список для пагинации
+            'title': playlist_info['title'],
+            'total': playlist_info['count'],
+            'page_size': page_size,
+            'url': url,
+        }
+
+        keyboard, start, end = build_playlist_keyboard(entries, 0, page_size, playlist_info['count'])
 
         info_text = f'Плейлист: {playlist_info["title"]}\n'
+        info_text += f'Треков: {len(entries)}'
         if playlist_info['count'] > len(entries):
-            info_text += f'Показаны первые {len(entries)} из {playlist_info["count"]} треков.\n'
-        info_text += '\nНажми кнопку, чтобы выбрать треки для скачивания:'
+            info_text += f' (загружено из {playlist_info["count"]})'
+        info_text += f'\n\nПоказаны треки {start}-{end}:'
 
         bot.edit_message_text(
             info_text,
@@ -207,6 +266,45 @@ def handle_playlist_url(message: telebot.types.Message) -> None:
             chat_id=message.chat.id,
             message_id=status_msg.message_id
         )
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('pl:'))
+def handle_playlist_navigation(call: telebot.types.CallbackQuery) -> None:
+    """Обработчик навигации по плейлисту."""
+    user_id = call.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    cached = playlist_cache.get(user_id)
+    if not cached:
+        bot.answer_callback_query(call.id, 'Данные устарели. Отправь ссылку ещё раз.')
+        return
+
+    try:
+        _, start_str, page_size_str = call.data.split(':')
+        start_idx = max(0, int(start_str))
+        page_size = int(page_size_str)
+
+        entries = cached['entries_list']
+        keyboard, start, end = build_playlist_keyboard(entries, start_idx, page_size, cached['total'])
+
+        info_text = f'Плейлист: {cached["title"]}\n'
+        info_text += f'Треков: {len(entries)}'
+        if cached['total'] > len(entries):
+            info_text += f' (загружено из {cached["total"]})'
+        info_text += f'\n\nПоказаны треки {start}-{end}:'
+
+        bot.edit_message_text(
+            info_text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=keyboard
+        )
+        bot.answer_callback_query(call.id)
+
+    except Exception as e:
+        logger.error(f'Ошибка навигации плейлиста: {e}')
+        bot.answer_callback_query(call.id, 'Ошибка навигации')
 
 
 @bot.message_handler(content_types=['web_app_data'])

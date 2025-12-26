@@ -79,9 +79,9 @@
         .track-item {
             display: flex;
             align-items: center;
-            padding: 12px 0;
+            padding: 10px 0;
             border-bottom: 1px solid var(--tg-theme-hint-color, #eee);
-            gap: 12px;
+            gap: 10px;
         }
 
         .track-item.hidden {
@@ -95,20 +95,31 @@
             accent-color: var(--tg-theme-button-color, #3390ec);
         }
 
+        .track-thumb {
+            width: 48px;
+            height: 48px;
+            border-radius: 4px;
+            object-fit: cover;
+            flex-shrink: 0;
+            background: var(--tg-theme-secondary-bg-color, #eee);
+        }
+
         .track-info {
             flex: 1;
             min-width: 0;
         }
 
         .track-title {
-            font-size: 15px;
-            white-space: nowrap;
+            font-size: 14px;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
             overflow: hidden;
-            text-overflow: ellipsis;
         }
 
         .track-duration {
-            font-size: 13px;
+            font-size: 12px;
             color: var(--tg-theme-hint-color, #666);
             margin-top: 2px;
         }
@@ -130,8 +141,8 @@
     <div class="header">
         <input type="text" class="search-box" id="search" placeholder="Поиск...">
         <div class="controls">
-            <button class="btn btn-secondary" id="selectAll">Выбрать все</button>
-            <button class="btn btn-secondary" id="deselectAll">Снять все</button>
+            <button class="btn btn-secondary" id="selectAll">Все</button>
+            <button class="btn btn-secondary" id="deselectAll">Сброс</button>
             <span class="counter" id="counter">0 / 0</span>
         </div>
     </div>
@@ -155,8 +166,21 @@
                 return null;
             }
             try {
-                const json = atob(dataB64.replace(/-/g, '+').replace(/_/g, '/'));
-                return JSON.parse(json);
+                // Декодируем base64 URL-safe в бинарные данные
+                const base64 = dataB64.replace(/-/g, '+').replace(/_/g, '/');
+                const binaryString = atob(base64);
+
+                // Конвертируем бинарную строку в Uint8Array
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // Декодируем UTF-8
+                const decoder = new TextDecoder('utf-8');
+                const jsonString = decoder.decode(bytes);
+
+                return JSON.parse(jsonString);
             } catch (e) {
                 console.error('Failed to decode data:', e);
                 return null;
@@ -193,10 +217,11 @@
             }
 
             list.innerHTML = tracks.map((track, index) => `
-                <li class="track-item" data-id="${track.id}" data-title="${track.title}">
+                <li class="track-item" data-id="${track.id}" data-title="${escapeAttr(track.title)}">
                     <input type="checkbox" class="track-checkbox" data-id="${track.id}">
+                    <img class="track-thumb" src="${track.thumb}" alt="" loading="lazy">
                     <div class="track-info">
-                        <div class="track-title">${index + 1}. ${escapeHtml(track.title)}</div>
+                        <div class="track-title">${escapeHtml(track.title)}</div>
                         <div class="track-duration">${track.duration}</div>
                     </div>
                 </li>
@@ -214,12 +239,26 @@
                     updateCounter();
                 });
             });
+
+            // Click on row toggles checkbox
+            document.querySelectorAll('.track-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    if (e.target.type === 'checkbox') return;
+                    const cb = item.querySelector('.track-checkbox');
+                    cb.checked = !cb.checked;
+                    cb.dispatchEvent(new Event('change'));
+                });
+            });
         }
 
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function escapeAttr(text) {
+            return text.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
         function selectAll() {
