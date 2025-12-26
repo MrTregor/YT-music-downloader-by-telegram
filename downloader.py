@@ -98,6 +98,54 @@ def get_video_info(url: str) -> dict:
     return result
 
 
+def get_playlist_info(url: str, max_entries: int = 50) -> dict:
+    """Получает список видео из плейлиста YouTube.
+
+    Args:
+        url: URL плейлиста YouTube
+        max_entries: Максимальное количество треков (по умолчанию 50)
+
+    Returns:
+        Словарь с данными плейлиста:
+        {
+            'title': 'Название плейлиста',
+            'count': 100,  # общее количество треков
+            'entries': [
+                {'id': 'xxx', 'title': 'Track 1', 'duration': 180},
+                ...
+            ]
+        }
+    """
+    logger.info(f'Получение информации о плейлисте: {url}')
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'proxy': PROXY,
+        'extract_flat': True,  # Не скачивать, только метаданные
+        'playlistend': max_entries,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    entries = []
+    for entry in info.get('entries', []):
+        if entry:
+            entries.append({
+                'id': entry.get('id'),
+                'title': entry.get('title'),
+                'duration': entry.get('duration') or 0,
+            })
+
+    result = {
+        'title': info.get('title', 'Плейлист'),
+        'count': info.get('playlist_count') or len(entries),
+        'entries': entries,
+    }
+    logger.info(f'Плейлист "{result["title"]}": {len(entries)} треков из {result["count"]}')
+    return result
+
+
 def embed_metadata(file_path: str, artist: str, title: str, thumbnail_url: str) -> Optional[str]:
     """Встраивает метаданные в M4A файл.
 
